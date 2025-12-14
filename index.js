@@ -67,6 +67,8 @@ bot.onText(/\/start/, async (msg) => {
     stats.registerUser(msg.from);
     stats.logInteraction(userId);
 
+    const isJoined = await checkSubscription(userId);
+
     if (!isJoined) {
         await bot.sendMessage(chatId, `👋 مرحباً بك!\n\nيجب عليك الانضمام إلى القناة لاستخدام البوت:\n${channelInviteLink || ''}`, {
             reply_markup: {
