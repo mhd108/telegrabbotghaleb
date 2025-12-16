@@ -167,7 +167,7 @@ bot.on('callback_query', async (query) => {
                     [{ text: '➕ إضافة قسم', callback_data: 'admin_add' }],
                     [{ text: '❌ حذف قسم', callback_data: 'admin_delete_list' }],
                     [{ text: '🔃 ترتيب الأقسام', callback_data: 'admin_reorder' }],
-                    [{ text: '📝 تعديل نص البروكسي', callback_data: 'admin_edit_proxy' }],
+                    [{ text: '📝 تعديل محتوى قسم', callback_data: 'admin_edit_list' }],
                     [{ text: '📊 الإحصائيات (Stats)', callback_data: 'admin_stats' }],
                     [{ text: '🔙 رجوع', callback_data: 'back_home' }]
                 ]
@@ -218,29 +218,49 @@ bot.on('callback_query', async (query) => {
         return;
     }
 
-    // 7. Request Proxy (Legacy Handler support - though new buttons use view_ID)
+    // 7. Request Proxy (Legacy Handler)
     if (data === 'request_proxy') {
-        const text = db.getProxyText();
-        // Fallback: If migration happened, we might need to find the section manually if getProxyText fails
-        // But getProxyText is updated to be safe.
+        // Just show the section content if it exists, otherwise legacy text
+        const sections = db.getSections();
+        const proxySec = sections.find(s => s.title.includes('بروكسي') || s.id.includes('proxy'));
+        const text = proxySec ? proxySec.content : "⚠️ لم يتم العثور على معلومات البروكسي.";
         await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
         return;
     }
 
-    // 8. Admin: Edit Proxy Text
-    if (data === 'admin_edit_proxy') {
+    // 8. Admin: List for Edit
+    if (data === 'admin_edit_list') {
         if (!adminIds.includes(userId)) return;
-        userStates[userId] = { action: 'awaiting_proxy_text' };
-        // We try to find the current text from the section
         const sections = db.getSections();
-        const proxySection = sections.find(s => s.title === 'لطلب بروكسي');
-        const currentText = proxySection ? proxySection.content : db.getProxyText();
+        const buttons = sections.map(s => [{ text: `✏️ ${s.title}`, callback_data: `edit_sec_${s.id}` }]);
+        buttons.push([{ text: '🔙 رجوع', callback_data: 'admin_panel' }]);
 
-        await bot.sendMessage(chatId, `📝 النص الحالي للبروكسي:\n\n"${currentText}"\n\nأرسل النص الجديد الآن:`);
+        await bot.editMessageText('اختر القسم المراد تعديل محتواه:', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: { inline_keyboard: buttons }
+        });
         return;
     }
 
-    // 9. Admin: Reorder Menu
+    // 9. Admin: Select Section to Edit
+    if (data.startsWith('edit_sec_')) {
+        if (!adminIds.includes(userId)) return;
+        const sectionId = data.split('edit_sec_')[1];
+        const section = db.getSection(sectionId);
+
+        if (!section) {
+            await bot.answerCallbackQuery(query.id, { text: 'القسم غير موجود!', show_alert: true });
+            return;
+        }
+
+        userStates[userId] = { action: 'awaiting_edit_content', sectionId: sectionId };
+
+        await bot.sendMessage(chatId, `📝 المحتوى الحالي للقسم (${section.title}):\n\n"${section.content}"\n\n👇 أرسل المحتوى الجديد الآن:`);
+        return;
+    }
+
+    // 10. Admin: Reorder Menu
     if (data === 'admin_reorder') {
         if (!adminIds.includes(userId)) return;
         const sections = db.getSections();
@@ -259,12 +279,12 @@ bot.on('callback_query', async (query) => {
         return;
     }
 
-    // 10. Admin: Move Up/Down
+    // 11. Admin: Move Up/Down
     if (data.startsWith('move_')) {
         if (!adminIds.includes(userId)) return;
-        const parts = data.split('_'); // move, up|down, id
+        const parts = data.split('_');
         const direction = parts[1];
-        const sectionId = parts.slice(2).join('_'); // Join back in case ID has underscores
+        const sectionId = parts.slice(2).join('_');
 
         db.moveSection(sectionId, direction);
 
@@ -283,64 +303,13 @@ bot.on('callback_query', async (query) => {
                 message_id: query.message.message_id,
                 reply_markup: { inline_keyboard: buttons }
             });
-        } catch (err) {
-            // Ignore "message is not modified" errors
-        }
+        } catch (err) { }
         return;
     }
 
-    // 11. Start Quiz (Deprecated from UI)
+    // 12. Start Quiz (Legacy)
     if (data === 'start_quiz') {
-        const quizzes = db.getQuizzes();
-        if (quizzes.length === 0) {
-            await bot.answerCallbackQuery(query.id, { text: 'عذراً، لا توجد اختبارات حالياً.', show_alert: true });
-            return;
-        }
-        // Pick random quiz
-        const randomQuiz = quizzes[Math.floor(Math.random() * quizzes.length)];
-
-        const optionButtons = randomQuiz.options.map((opt, index) => {
-            return [{ text: opt, callback_data: `answer_${randomQuiz.id}_${index}` }];
-        });
-        optionButtons.push([{ text: '🔙 رجوع', callback_data: 'back_home' }]);
-
-        await bot.editMessageText(`🧠 *سؤال:* ${randomQuiz.question}`, {
-            chat_id: chatId,
-            message_id: query.message.message_id,
-            parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: optionButtons }
-        });
-        return;
-    }
-
-    // 12. Handle Quiz Answer
-    if (data.startsWith('answer_')) {
-        const parts = data.split('_');
-        const quizId = parts[1];
-        const answerIndex = parseInt(parts[2]);
-
-        const quiz = db.getQuiz(quizId);
-
-        if (!quiz) {
-            await bot.answerCallbackQuery(query.id, { text: 'خطأ: السؤال غير موجود.', show_alert: true });
-            return;
-        }
-
-        if (answerIndex === quiz.correctIndex) {
-            await bot.answerCallbackQuery(query.id, { text: '✅ إجابة صحيحة! أحسنت 🎉', show_alert: true });
-            // Show another question? Or go back? Let's go back to menu for now or show "Next"
-            // For simplicity, let's just re-show the menu or allow another quiz
-            await bot.sendMessage(chatId, '✅ إجابة صحيحة! هل تريد تجربة سؤال آخر؟', {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🔄 سؤال آخر', callback_data: 'start_quiz' }],
-                        [{ text: '🏠 القائمة الرئيسية', callback_data: 'back_home' }]
-                    ]
-                }
-            });
-        } else {
-            await bot.answerCallbackQuery(query.id, { text: '❌ إجابة خاطئة، حاول مرة أخرى.', show_alert: true });
-        }
+        await bot.answerCallbackQuery(query.id, { text: 'عذراً، لا توجد اختبارات حالياً.', show_alert: true });
         return;
     }
 
@@ -421,14 +390,26 @@ bot.on('message', async (msg) => {
                 inline_keyboard: [[{ text: '⚙️ العودة للوحة التحكم', callback_data: 'admin_panel' }]]
             }
         });
-    } else if (state.action === 'awaiting_proxy_text') {
-        db.setProxyText(text);
-        delete userStates[userId];
-        await bot.sendMessage(chatId, '✅ تم تحديث نص طلب البروكسي بنجاح!', {
-            reply_markup: {
-                inline_keyboard: [[{ text: '⚙️ العودة للوحة التحكم', callback_data: 'admin_panel' }]]
+    } else if (state.action === 'awaiting_edit_content') {
+        // Handle Section Editing
+        if (text) {
+            const success = db.updateSection(state.sectionId, text);
+            delete userStates[userId];
+
+            if (success) {
+                await bot.sendMessage(chatId, '✅ تم تحديث نص القسم بنجاح!', {
+                    reply_markup: {
+                        inline_keyboard: [[{ text: '⚙️ العودة للوحة التحكم', callback_data: 'admin_panel' }]]
+                    }
+                });
+            } else {
+                await bot.sendMessage(chatId, '❌ فشل التحديث: القسم غير موجود.', {
+                    reply_markup: {
+                        inline_keyboard: [[{ text: '⚙️ العودة للوحة التحكم', callback_data: 'admin_panel' }]]
+                    }
+                });
             }
-        });
+        }
     }
 });
 
