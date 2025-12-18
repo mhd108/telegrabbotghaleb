@@ -33,17 +33,22 @@ const bot = new TelegramBot(token, { polling: true });
 const userStates = {};
 
 // Helper: Check if user joined the channel
+// Helper: Check if user joined the channel
 async function checkSubscription(userId) {
+    // 0. Admin Bypass (Always allow admins)
+    if (adminIds.includes(userId)) return true;
+
     if (!requiredChannelId) return true; // No channel set, skip check
     try {
         const chatMember = await bot.getChatMember(requiredChannelId, userId);
-        return ['creator', 'administrator', 'member'].includes(chatMember.status);
+        console.log(`Subscription Check: User ${userId} status is '${chatMember.status}'`);
+
+        // Accepted statuses (added 'restricted' just in case)
+        return ['creator', 'administrator', 'member', 'restricted'].includes(chatMember.status);
     } catch (error) {
-        console.error('Error checking subscription:', error.message);
-        // If error suggests channel not found or bot not admin, maybe log that.
-        // For now, fail safe (allow access) or strict? Strict is better for forced sub.
-        // But if config is wrong, it locks everyone out.
-        // Let's return false to enforce, but ensure ID is correct.
+        console.error(`Error checking subscription for User ${userId}:`, error.message);
+        // If error occurs (e.g., bot not admin), we default to false (locked) 
+        // but log it clearly so it can be fixed.
         return false;
     }
 }
