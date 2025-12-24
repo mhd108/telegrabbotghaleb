@@ -152,7 +152,7 @@ bot.on('callback_query', async (query) => {
         const sectionId = data.split('view_')[1];
         const section = db.getSection(sectionId);
         if (section) {
-            await bot.sendMessage(chatId, `📚 *${section.title}*\n\n${section.content}`, { parse_mode: 'Markdown' });
+            await bot.sendMessage(chatId, `📚 *${section.title}*\n\n${section.content}\n\n/start`, { parse_mode: 'Markdown' });
         } else {
             // Fallback for legacy proxy requests if they somehow come here or if ID changed
             await bot.answerCallbackQuery(query.id, { text: 'عذراً، هذا القسم لم يعد موجوداً.', show_alert: true });
@@ -229,7 +229,7 @@ bot.on('callback_query', async (query) => {
         const sections = db.getSections();
         const proxySec = sections.find(s => s.title.includes('بروكسي') || s.id.includes('proxy'));
         const text = proxySec ? proxySec.content : "⚠️ لم يتم العثور على معلومات البروكسي.";
-        await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, text + '\n\n/start', { parse_mode: 'Markdown' });
         return;
     }
 
